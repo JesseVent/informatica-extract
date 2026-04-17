@@ -1,6 +1,6 @@
 {
-  "name": "ETL Lineage & Logic Explorer",
-  "description": "Analyze Informatica PowerCenter XML exports for data lineage, business logic, and risk assessment.",
+  "name": "Informatiwho",
+  "description": "The ultimate 'Who, What, Where' for Informatica ETL. Analyze lineage, business logic, and risk assessment.",
   "requestFramePermissions": [],
   "majorCapabilities": []
 }

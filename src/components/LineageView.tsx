@@ -1,15 +1,17 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Database, ArrowRight, Settings, Filter, Search, Target, X, GitMerge, List } from 'lucide-react';
-import { ETLMapping, ETLTransformation, ETLLineageStep } from '../types';
+import { ETLMapping, ETLTransformation, ETLLineageStep, ETLAnalysis } from '../types';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+import { AlertCircle, Brain, Info } from 'lucide-react';
 
 interface LineageViewProps {
   mapping: ETLMapping;
+  analysis: ETLAnalysis | null;
 }
 
 const TRANSFORMATION_GUIDE: Record<string, { description: string; icon: React.ReactNode }> = {
@@ -47,9 +49,24 @@ const TRANSFORMATION_GUIDE: Record<string, { description: string; icon: React.Re
   }
 };
 
-export function LineageView({ mapping }: LineageViewProps) {
+export function LineageView({ mapping, analysis }: LineageViewProps) {
   const [selectedTx, setSelectedTx] = useState<ETLTransformation | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
+
+  const isComplex = (tx: ETLTransformation) => {
+    // Check if it's in business logic analysis
+    const inAnalysis = analysis?.businessLogic.some(b => b.key === tx.name);
+    // Or if it has significant logic content
+    const lengthScore = (tx.logic?.length || 0) > 100;
+    return inAnalysis || lengthScore;
+  };
+
+  const hasHighRisk = (tx: ETLTransformation) => {
+    // Transformations like Lookup with complex overrides or Joiners can be risky
+    if (tx.type.includes('Lookup') && (tx.logic?.includes('SQL') || tx.logic?.includes('JOIN'))) return true;
+    if (tx.type.includes('Joiner') && tx.logic?.includes('Sorted')) return false; // Sorted joiner is better
+    return false;
+  };
 
   const filteredTransformations = mapping.transformations.filter(tx => 
     tx.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -119,8 +136,20 @@ export function LineageView({ mapping }: LineageViewProps) {
           {/* Transformations */}
           <div className="flex flex-col gap-6 min-w-[280px]">
             <div className="flex flex-col gap-3">
-              <div className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground flex items-center gap-2">
-                <Settings className="w-3 h-3" /> Transformations
+              <div className="flex items-center justify-between">
+                <div className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground flex items-center gap-2">
+                  <Settings className="w-3 h-3" /> Transformations
+                </div>
+                <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-1">
+                    <div className="w-2 h-2 rounded-full bg-blue-500" />
+                    <span className="text-[8px] font-bold text-muted-foreground uppercase opacity-70">Logic Hub</span>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <div className="w-2 h-2 rounded-full bg-amber-500" />
+                    <span className="text-[8px] font-bold text-muted-foreground uppercase opacity-70">Perf Risk</span>
+                  </div>
+                </div>
               </div>
               <div className="relative">
                 <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
@@ -155,11 +184,46 @@ export function LineageView({ mapping }: LineageViewProps) {
                     className={`p-4 cursor-pointer border-2 shadow-sm hover:shadow-md transition-all bg-white relative group ${
                       selectedTx?.name === tx.name ? 'ring-2 ring-primary ring-offset-2' : ''
                     } ${
+                      isComplex(tx) ? 'bg-blue-50/30' : ''
+                    } ${
                       tx.type.includes('Filter') ? 'border-orange-500/20' : 
                       tx.type.includes('Lookup') ? 'border-purple-500/20' : 
                       'border-blue-500/20'
                     }`}
                   >
+                    {isComplex(tx) && (
+                      <div className="absolute -top-2 -left-2 z-20">
+                        <TooltipProvider>
+                          <Tooltip>
+                            <TooltipTrigger>
+                              <div className="bg-blue-600 text-white p-1 rounded-full shadow-lg">
+                                <Brain className="w-3 h-3" />
+                              </div>
+                            </TooltipTrigger>
+                            <TooltipContent className="bg-blue-900 text-[10px] text-white border-none px-2 py-1">
+                              Complex Transformation Logic
+                            </TooltipContent>
+                          </Tooltip>
+                        </TooltipProvider>
+                      </div>
+                    )}
+
+                    {hasHighRisk(tx) && (
+                      <div className="absolute -top-2 -right-2 z-20">
+                        <TooltipProvider>
+                          <Tooltip>
+                            <TooltipTrigger>
+                              <div className="bg-amber-500 text-white p-1 rounded-full shadow-lg animate-pulse">
+                                <AlertCircle className="w-3 h-3" />
+                              </div>
+                            </TooltipTrigger>
+                            <TooltipContent className="bg-amber-900 text-[10px] text-white border-none px-2 py-1">
+                              Potential Performance Risk
+                            </TooltipContent>
+                          </Tooltip>
+                        </TooltipProvider>
+                      </div>
+                    )}
                     <div className="flex items-center gap-3">
                       <div className={`p-1.5 rounded ${
                         tx.type.includes('Filter') ? 'bg-orange-500/10 text-orange-600' : 
@@ -256,59 +320,95 @@ export function LineageView({ mapping }: LineageViewProps) {
             </div>
 
             <div className="flex-1 overflow-y-auto p-6 space-y-8">
-              {/* Type & Description */}
-              <div className="space-y-4">
-                <div className="flex items-center gap-3">
-                  <div className="p-2 bg-primary/10 rounded-lg text-primary">
-                    {getTxGuide(selectedTx.type).icon}
+              {/* Core Attributes: Description & Logic */}
+              <div className="space-y-6">
+                <div className="space-y-3">
+                  <div className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
+                    <Info className="w-3 h-3" /> Metadata & Description
                   </div>
-                  <div>
-                    <Badge variant="secondary" className="text-[10px] font-bold uppercase tracking-wider mb-1">
-                      {selectedTx.type}
-                    </Badge>
-                    <p className="text-[11px] text-muted-foreground leading-snug">
-                      {getTxGuide(selectedTx.type).description}
-                    </p>
+                  <div className="p-4 bg-muted/30 border border-border/50 rounded-xl">
+                    <div className="flex items-center gap-3 mb-3">
+                      <div className="p-2 bg-primary/10 rounded-lg text-primary shrink-0">
+                        {getTxGuide(selectedTx.type).icon}
+                      </div>
+                      <div>
+                        <div className="flex items-center gap-2 mb-1">
+                          <Badge variant="secondary" className="text-[10px] font-bold uppercase tracking-wider">
+                            {selectedTx.type}
+                          </Badge>
+                          {isComplex(selectedTx) && (
+                            <Badge className="bg-blue-100 text-blue-700 hover:bg-blue-100 border-none text-[8px] h-4 uppercase font-bold px-1.5 leading-none">
+                              <Brain className="w-2 h-2 mr-1" /> Complex
+                            </Badge>
+                          )}
+                          {hasHighRisk(selectedTx) && (
+                            <Badge className="bg-amber-100 text-amber-700 hover:bg-amber-100 border-none text-[8px] h-4 uppercase font-bold px-1.5 leading-none">
+                              <AlertCircle className="w-2 h-2 mr-1" /> Risk
+                            </Badge>
+                          )}
+                        </div>
+                        <p className="text-[11px] font-medium text-muted-foreground leading-snug">
+                          {getTxGuide(selectedTx.type).description}
+                        </p>
+                      </div>
+                    </div>
+                    {selectedTx.description ? (
+                      <div className="pt-3 border-t border-border/50">
+                        <p className="text-xs text-foreground/80 leading-relaxed italic">
+                          "{selectedTx.description}"
+                        </p>
+                      </div>
+                    ) : (
+                      <p className="text-[10px] text-muted-foreground italic pt-2 border-t border-border/50">
+                        No description provided for this transformation.
+                      </p>
+                    )}
                   </div>
                 </div>
-                
-                {selectedTx.description && (
-                  <div className="p-3 bg-muted/30 border border-border/50 rounded-lg">
-                    <p className="text-xs text-muted-foreground leading-relaxed italic">
-                      "{selectedTx.description}"
-                    </p>
-                  </div>
-                )}
-              </div>
 
-              <Separator />
-
-              {/* Transformation Logic */}
-              <div className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
-                    <List className="w-3 h-3" /> Transformation Logic
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
+                      <List className="w-3 h-3" /> Detailed Transformation Logic
+                    </div>
+                    {selectedTx.logic && (
+                      <Badge variant="outline" className="text-[8px] h-4 px-1 opacity-50 bg-slate-900 border-slate-700 text-slate-400">XML EXPRESSION</Badge>
+                    )}
                   </div>
-                  {selectedTx.logic && (
-                    <Badge variant="outline" className="text-[8px] h-4 px-1 opacity-50">DETERMINISTIC</Badge>
+                  {selectedTx.logic ? (
+                    <div className="group relative">
+                      <div className="bg-slate-950 rounded-xl p-4 font-mono text-[11px] leading-relaxed text-slate-300 border border-slate-800 shadow-inner whitespace-pre-wrap overflow-x-auto max-h-[400px] scrollbar-thin scrollbar-thumb-slate-800">
+                        {selectedTx.logic}
+                      </div>
+                      <div className="absolute top-3 right-3 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <TooltipProvider>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Button 
+                                variant="secondary" 
+                                size="icon" 
+                                className="h-7 w-7 bg-slate-800 text-slate-300 hover:bg-slate-700 hover:text-white border border-slate-700"
+                                onClick={() => {
+                                  navigator.clipboard.writeText(selectedTx.logic || '');
+                                }}
+                              >
+                                <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="lucide lucide-copy"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>
+                              </Button>
+                            </TooltipTrigger>
+                            <TooltipContent className="bg-slate-900 text-white border-slate-800 text-[10px]">
+                              Copy expression to clipboard
+                            </TooltipContent>
+                          </Tooltip>
+                        </TooltipProvider>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="text-[11px] text-muted-foreground italic p-8 border-2 border-dashed border-border rounded-xl text-center bg-muted/5">
+                      <Settings className="w-5 h-5 mx-auto mb-2 opacity-20" />
+                      No complex logic or EXPRESSION attributes found for this transformation.
+                    </div>
                   )}
                 </div>
-                {selectedTx.logic ? (
-                  <div className="group relative">
-                    <div className="bg-slate-950 rounded-lg p-4 font-mono text-[11px] leading-relaxed text-slate-300 border border-slate-800 whitespace-pre-wrap overflow-x-auto max-h-[300px] scrollbar-thin scrollbar-thumb-slate-800">
-                      {selectedTx.logic}
-                    </div>
-                    <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                      <Button variant="ghost" size="icon" className="h-6 w-6 text-slate-400 hover:text-white hover:bg-slate-800" onClick={() => navigator.clipboard.writeText(selectedTx.logic || '')}>
-                        <List className="w-3 h-3" />
-                      </Button>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="text-xs text-muted-foreground italic p-6 border border-dashed border-border rounded-lg text-center bg-muted/10">
-                    No complex logic or expressions defined for this step.
-                  </div>
-                )}
               </div>
 
               <Separator />
@@ -326,24 +426,26 @@ export function LineageView({ mapping }: LineageViewProps) {
                       <div className="w-1.5 h-1.5 rounded-full bg-green-500" />
                       Incoming Fields (Upstream)
                     </p>
-                    <div className="space-y-2">
+                    <div className="space-y-3">
                       {getFieldLineage(selectedTx.name).inputs.map((l, i) => (
-                        <div key={i} className="p-2.5 bg-green-50/30 border border-green-100 rounded-lg text-[11px] space-y-2">
-                          <div className="flex items-center justify-between text-green-800 font-bold">
+                        <div key={i} className="p-3 bg-green-50/40 border border-green-200/50 rounded-xl text-[11px] space-y-2.5 transition-all hover:bg-green-50 shadow-sm">
+                          <div className="flex items-center justify-between text-green-800 font-bold px-1">
                             <span className="truncate" title={l.toField}>{l.toField}</span>
-                            <Badge variant="outline" className="text-[8px] h-4 px-1 bg-green-100/50 border-green-200 text-green-700">IN</Badge>
+                            <Badge variant="outline" className="text-[8px] h-4 px-1.5 bg-green-100/80 border-green-300 text-green-700 font-black">IN</Badge>
                           </div>
-                          <div className="flex items-center gap-2 text-muted-foreground text-[10px] bg-white/50 p-1.5 rounded border border-green-100/50">
-                            <ArrowRight className="w-3 h-3 rotate-180 text-green-400 shrink-0" />
-                            <div className="min-w-0">
-                              <div className="flex items-center gap-1.5 mb-0.5">
+                          <div className="flex items-center gap-3 text-muted-foreground text-[10px] bg-white border border-green-100 p-2 rounded-lg shadow-inner">
+                            <div className="p-1 bg-green-100 rounded text-green-600">
+                              <ArrowRight className="w-3 h-3 rotate-180" />
+                            </div>
+                            <div className="min-w-0 flex-1">
+                              <div className="flex items-center gap-2 mb-1">
                                 <span className="font-bold text-foreground truncate">{l.fromField}</span>
-                                <Badge className={`text-[8px] h-3 px-1 font-black uppercase ${
+                                <Badge className={`text-[8px] h-3.5 px-1 font-black uppercase tracking-tighter ${
                                   l.originType === 'Source' ? 'bg-green-600' : 'bg-blue-600'
                                 }`}>{l.originType}</Badge>
                               </div>
-                              <div className="text-[9px] text-muted-foreground truncate italic">
-                                from <span className="font-bold text-primary/80 not-italic">{l.from}</span>
+                              <div className="text-[9px] text-muted-foreground truncate flex items-center gap-1">
+                                from <span className="font-bold text-primary/70">{l.from}</span>
                               </div>
                             </div>
                           </div>
@@ -361,24 +463,26 @@ export function LineageView({ mapping }: LineageViewProps) {
                       <div className="w-1.5 h-1.5 rounded-full bg-blue-500" />
                       Outgoing Fields (Downstream)
                     </p>
-                    <div className="space-y-2">
+                    <div className="space-y-3">
                       {getFieldLineage(selectedTx.name).outputs.map((l, i) => (
-                        <div key={i} className="p-2.5 bg-blue-50/30 border border-blue-100 rounded-lg text-[11px] space-y-2">
-                          <div className="flex items-center justify-between text-blue-800 font-bold">
+                        <div key={i} className="p-3 bg-blue-50/40 border border-blue-200/50 rounded-xl text-[11px] space-y-2.5 transition-all hover:bg-blue-50 shadow-sm">
+                          <div className="flex items-center justify-between text-blue-800 font-bold px-1">
                             <span className="truncate" title={l.fromField}>{l.fromField}</span>
-                            <Badge variant="outline" className="text-[8px] h-4 px-1 bg-blue-100/50 border-blue-200 text-blue-700">OUT</Badge>
+                            <Badge variant="outline" className="text-[8px] h-4 px-1.5 bg-blue-100/80 border-blue-300 text-blue-700 font-black">OUT</Badge>
                           </div>
-                          <div className="flex items-center gap-2 text-muted-foreground text-[10px] bg-white/50 p-1.5 rounded border border-blue-100/50">
-                            <ArrowRight className="w-3 h-3 text-blue-400 shrink-0" />
-                            <div className="min-w-0">
-                              <div className="flex items-center gap-1.5 mb-0.5">
+                          <div className="flex items-center gap-3 text-muted-foreground text-[10px] bg-white border border-blue-100 p-2 rounded-lg shadow-inner">
+                            <div className="p-1 bg-blue-100 rounded text-blue-600">
+                              <ArrowRight className="w-3 h-3" />
+                            </div>
+                            <div className="min-w-0 flex-1">
+                              <div className="flex items-center gap-2 mb-1">
                                 <span className="font-bold text-foreground truncate">{l.toField}</span>
-                                <Badge className={`text-[8px] h-3 px-1 font-black uppercase ${
+                                <Badge className={`text-[8px] h-3.5 px-1 font-black uppercase tracking-tighter ${
                                   l.destinationType === 'Target' ? 'bg-orange-600' : 'bg-blue-600'
                                 }`}>{l.destinationType}</Badge>
                               </div>
-                              <div className="text-[9px] text-muted-foreground truncate italic">
-                                to <span className="font-bold text-primary/80 not-italic">{l.to}</span>
+                              <div className="text-[9px] text-muted-foreground truncate flex items-center gap-1">
+                                to <span className="font-bold text-primary/70">{l.to}</span>
                               </div>
                             </div>
                           </div>

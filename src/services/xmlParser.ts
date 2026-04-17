@@ -96,8 +96,23 @@ export async function parseInformaticaXML(xmlContent: string): Promise<ETLProjec
         for (let k = 0; k < fields.length; k++) {
           const f = fields[k];
           const fExpr = f.getAttribute("EXPRESSION");
-          if (fExpr) logicParts.push(`${f.getAttribute("NAME")}: ${fExpr}`);
+          const fName = f.getAttribute("NAME");
+          if (fExpr) {
+            logicParts.push(`${fName}: ${fExpr}`);
+          }
         }
+        
+        // Also check for specific attributes that define logic
+        const tAttributes = t.getElementsByTagName("TABLEATTRIBUTE");
+        for (let k = 0; k < tAttributes.length; k++) {
+          const attr = tAttributes[k];
+          const attrName = attr.getAttribute("NAME");
+          const attrValue = attr.getAttribute("VALUE");
+          if (attrName?.includes('Condition') || attrName?.includes('Filter Override')) {
+            logicParts.push(`${attrName}: ${attrValue}`);
+          }
+        }
+
         if (logicParts.length > 0) existing.logic = logicParts.join('\n');
       }
     }
@@ -149,8 +164,10 @@ export async function parseInformaticaXML(xmlContent: string): Promise<ETLProjec
     const tasks = w.getElementsByTagName("TASKINSTANCE");
     for (let j = 0; j < tasks.length; j++) {
       const t = tasks[j];
-      if (t.getAttribute("TASKTYPE") === 'Session') {
-        workflow.sessions.push(t.getAttribute("NAME") || "");
+      const taskType = t.getAttribute("TASKTYPE");
+      const taskName = t.getAttribute("NAME");
+      if (taskType === 'Session' || taskType === 'Command' || taskType === 'Email') {
+        workflow.sessions.push(taskName || "Unnamed Task");
       }
     }
 

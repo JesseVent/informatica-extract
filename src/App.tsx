@@ -3,8 +3,11 @@ import { motion, AnimatePresence } from 'motion/react';
 import { FileUploader } from './components/FileUploader';
 import { LineageView } from './components/LineageView';
 import { AnalysisView } from './components/AnalysisView';
+import { PipelineOverview } from './components/PipelineOverview';
+import { SourcesExplorer } from './components/SourcesExplorer';
 import { parseInformaticaXML } from './services/xmlParser';
 import { analyzeETLMapping } from './services/analysisService';
+import { generateETLReport } from './services/reportService';
 import { ETLMapping, ETLAnalysis, ETLProject, ETLWorkflow, ETLMaplet, ETLParameter } from './types';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -82,7 +85,7 @@ export default function App() {
               <div className="w-8 h-8 bg-primary rounded-lg flex items-center justify-center">
                 <Database className="w-5 h-5 text-primary-foreground" />
               </div>
-              <h1 className="text-lg font-bold tracking-tight">ETL Architect Pro</h1>
+              <h1 className="text-lg font-bold tracking-tight">Informatiwho</h1>
               {fileName && (
                 <span className="ml-4 px-2.5 py-1 bg-background border border-border rounded text-[11px] font-bold text-muted-foreground uppercase tracking-wider">
                   {fileName}
@@ -90,9 +93,14 @@ export default function App() {
               )}
             </div>
             <div className="flex items-center gap-3">
-              {xmlContent && (
+              {xmlContent && project && (
                 <>
-                  <Button variant="outline" size="sm" className="text-xs font-semibold">
+                  <Button 
+                    variant="outline" 
+                    size="sm" 
+                    onClick={() => generateETLReport(project, analysis)}
+                    className="text-xs font-semibold"
+                  >
                     Export PDF
                   </Button>
                   <Button size="sm" onClick={handleClear} className="text-xs font-bold">
@@ -271,24 +279,44 @@ export default function App() {
                         <Button onClick={handleClear}>Try Again</Button>
                       </Card>
                     ) : (
-                      <Tabs defaultValue="lineage" className="w-full">
+                      <Tabs defaultValue="overview" className="w-full">
                         <TabsList className="bg-white border border-border p-1 h-10 w-fit mb-6">
+                          <TabsTrigger value="overview" className="text-xs font-semibold data-[state=active]:bg-background data-[state=active]:shadow-none">
+                            <LayoutDashboard className="w-3.5 h-3.5 mr-2" /> Pipeline Overview
+                          </TabsTrigger>
                           <TabsTrigger value="lineage" className="text-xs font-semibold data-[state=active]:bg-background data-[state=active]:shadow-none">
                             <Network className="w-3.5 h-3.5 mr-2" /> Lineage
                           </TabsTrigger>
                           <TabsTrigger value="analysis" className="text-xs font-semibold data-[state=active]:bg-background data-[state=active]:shadow-none">
-                            <LayoutDashboard className="w-3.5 h-3.5 mr-2" /> Analysis
+                            <ShieldCheck className="w-3.5 h-3.5 mr-2" /> Security & Risks
                           </TabsTrigger>
                           <TabsTrigger value="workflow" className="text-xs font-semibold data-[state=active]:bg-background data-[state=active]:shadow-none">
-                            <Workflow className="w-3.5 h-3.5 mr-2" /> Workflow
+                            <Workflow className="w-3.5 h-3.5 mr-2" /> Workflows
+                          </TabsTrigger>
+                          <TabsTrigger value="sources" className="text-xs font-semibold data-[state=active]:bg-background data-[state=active]:shadow-none">
+                            <Database className="w-3.5 h-3.5 mr-2" /> Data Catalog
                           </TabsTrigger>
                           <TabsTrigger value="params" className="text-xs font-semibold data-[state=active]:bg-background data-[state=active]:shadow-none">
                             <Settings className="w-3.5 h-3.5 mr-2" /> Parameters
                           </TabsTrigger>
                         </TabsList>
                         
+                        <TabsContent value="overview" className="mt-0">
+                          {project && (
+                            <PipelineOverview 
+                              project={project} 
+                              onSelectMapping={(m) => {
+                                handleMappingSelect(m);
+                                // A small hack to switch to lineage tab
+                                const lineageTab = document.querySelector('[value="lineage"]') as HTMLButtonElement;
+                                if (lineageTab) lineageTab.click();
+                              }}
+                            />
+                          )}
+                        </TabsContent>
+
                         <TabsContent value="lineage" className="mt-0 flex-1 overflow-hidden">
-                          {selectedMapping && <LineageView mapping={selectedMapping} />}
+                          {selectedMapping && <LineageView mapping={selectedMapping} analysis={analysis} />}
                         </TabsContent>
                         
                         <TabsContent value="analysis" className="mt-0">
@@ -344,6 +372,10 @@ export default function App() {
                               </div>
                             )}
                           </div>
+                        </TabsContent>
+
+                        <TabsContent value="sources" className="mt-0">
+                          {project && <SourcesExplorer project={project} />}
                         </TabsContent>
 
                         <TabsContent value="params" className="mt-0">
