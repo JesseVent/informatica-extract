@@ -1,0 +1,6 @@
+{
+  "name": "ETL Lineage & Logic Explorer",
+  "description": "Analyze Informatica PowerCenter XML exports for data lineage, business logic, and risk assessment.",
+  "requestFramePermissions": [],
+  "majorCapabilities": []
+}
